@@ -1,0 +1,1 @@
+# EURe bot CosmWasm
