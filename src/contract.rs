@@ -1,16 +1,19 @@
-use crate::ContractError::Unauthorized;
+use crate::ContractError::{AllPending, Unauthorized};
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Uint256,
+    to_json_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
+    Uint256,
 };
 use ethabi::{Address, Contract, Function, Param, ParamType, StateMutability, Token, Uint};
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use crate::error::ContractError;
-use crate::msg::{Deposit, ExecuteMsg, GetJobIdResponse, InstantiateMsg, PalomaMsg, QueryMsg};
-use crate::state::{State, STATE};
+use crate::msg::{
+    Deposit, ExecuteMsg, GetJobIdResponse, InstantiateMsg, Metadata, PalomaMsg, QueryMsg,
+};
+use crate::state::{State, STATE, WITHDRAW_TIMESTAMP};
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
@@ -20,8 +23,13 @@ pub fn instantiate(
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
     let state = State {
+        retry_delay: msg.retry_delay,
         job_id: msg.job_id.clone(),
         owner: info.sender.clone(),
+        metadata: Metadata {
+            creator: msg.creator,
+            signers: msg.signers,
+        },
     };
     STATE.save(deps.storage, &state)?;
     Ok(Response::new()
@@ -33,12 +41,12 @@ pub fn instantiate(
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     info: MessageInfo,
     msg: ExecuteMsg,
 ) -> Result<Response<PalomaMsg>, ContractError> {
     match msg {
-        ExecuteMsg::PutSwap { deposit } => swap(deps, info, deposit),
+        ExecuteMsg::PutSwap { deposit } => swap(deps, env, info, deposit),
         ExecuteMsg::SetPaloma {} => set_paloma(deps, info),
         ExecuteMsg::UpdateCompass { new_compass } => update_compass(deps, info, new_compass),
         ExecuteMsg::UpdateRefundWallet { new_refund_wallet } => {
@@ -56,6 +64,7 @@ pub fn execute(
 
 fn swap(
     deps: DepsMut,
+    env: Env,
     info: MessageInfo,
     deposits: Deposit,
 ) -> Result<Response<PalomaMsg>, ContractError> {
@@ -91,6 +100,11 @@ fn swap(
                         kind: ParamType::Uint(256),
                         internal_type: None,
                     },
+                    Param {
+                        name: "number_trades".to_string(),
+                        kind: ParamType::Uint(256),
+                        internal_type: None,
+                    },
                 ],
                 outputs: Vec::new(),
                 constant: None,
@@ -102,12 +116,35 @@ fn swap(
         receive: false,
         fallback: false,
     };
+    if let Some(timestamp) = WITHDRAW_TIMESTAMP.may_load(
+        deps.storage,
+        (
+            deposits.deposit_id.to_string(),
+            deposits.number_trades.to_string(),
+        ),
+    )? {
+        if timestamp
+            .plus_seconds(state.retry_delay)
+            .gt(&env.block.time)
+        {
+            return Err(AllPending {});
+        }
+    }
+    WITHDRAW_TIMESTAMP.save(
+        deps.storage,
+        (
+            deposits.deposit_id.to_string(),
+            deposits.number_trades.to_string(),
+        ),
+        &env.block.time,
+    )?;
 
     let tokens = vec![
         Token::Address(Address::from_str(deposits.receiver.as_str()).unwrap()),
         Token::Uint(Uint::from_big_endian(&deposits.amount.to_be_bytes())),
         Token::Uint(Uint::from_big_endian(&deposits.expected.to_be_bytes())),
         Token::Uint(Uint::from_big_endian(&deposits.deposit_id.to_be_bytes())),
+        Token::Uint(Uint::from_big_endian(&deposits.number_trades.to_be_bytes())),
     ];
     let state = STATE.load(deps.storage)?;
     Ok(Response::new()
@@ -120,6 +157,7 @@ fn swap(
                     .encode_input(tokens.as_slice())
                     .unwrap(),
             ),
+            metadata: state.metadata,
         }))
         .add_attribute("action", "swap"))
 }
@@ -157,6 +195,7 @@ fn set_paloma(deps: DepsMut, info: MessageInfo) -> Result<Response<PalomaMsg>, C
                     .encode_input(&[])
                     .unwrap(),
             ),
+            metadata: state.metadata,
         }))
         .add_attribute("action", "set_paloma"))
 }
@@ -204,6 +243,7 @@ fn update_compass(
                     .encode_input(&[Token::Address(new_compass_address)])
                     .unwrap(),
             ),
+            metadata: state.metadata,
         }))
         .add_attribute("action", "update_compass"))
 }
@@ -251,6 +291,7 @@ fn update_refund_wallet(
                     .encode_input(&[Token::Address(new_refund_wallet_address)])
                     .unwrap(),
             ),
+            metadata: state.metadata,
         }))
         .add_attribute("action", "update_refund_wallet"))
 }
@@ -297,6 +338,7 @@ fn update_fee(
                     .encode_input(&[Token::Uint(Uint::from_big_endian(&fee.to_be_bytes()))])
                     .unwrap(),
             ),
+            metadata: state.metadata,
         }))
         .add_attribute("action", "update_fee"))
 }
@@ -345,6 +387,7 @@ fn update_service_fee_collector(
                     .encode_input(&[Token::Address(new_service_fee_collector_address)])
                     .unwrap(),
             ),
+            metadata: state.metadata,
         }))
         .add_attribute("action", "update_service_fee_collector"))
 }
@@ -393,6 +436,7 @@ fn update_service_fee(
                     ))])
                     .unwrap(),
             ),
+            metadata: state.metadata,
         }))
         .add_attribute("action", "update_service_fee"))
 }
@@ -400,7 +444,7 @@ fn update_service_fee(
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::GetJobId {} => to_binary(&get_job_id(deps)?),
+        QueryMsg::GetJobId {} => to_json_binary(&get_job_id(deps)?),
     }
 }
 

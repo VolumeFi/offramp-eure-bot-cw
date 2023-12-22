@@ -3,7 +3,10 @@ use cosmwasm_std::{Binary, CustomMsg, Uint256};
 
 #[cw_serde]
 pub struct InstantiateMsg {
+    pub retry_delay: u64,
     pub job_id: String,
+    pub creator: String,
+    pub signers: Vec<String>,
 }
 
 #[cw_serde]
@@ -23,6 +26,14 @@ pub struct Deposit {
     pub amount: Uint256,
     pub expected: Uint256,
     pub deposit_id: Uint256,
+    pub number_trades: Uint256,
+}
+
+#[cw_serde]
+#[derive(Eq)]
+pub struct Metadata {
+    pub creator: String,
+    pub signers: Vec<String>,
 }
 
 /// Message struct for cross-chain calls.
@@ -32,6 +43,8 @@ pub struct PalomaMsg {
     pub job_id: String,
     /// The payload, ABI encoded for the target chain.
     pub payload: Binary,
+    /// Metadata
+    pub metadata: Metadata,
 }
 
 #[cw_serde]
