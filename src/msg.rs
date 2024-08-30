@@ -18,6 +18,7 @@ pub enum ExecuteMsg {
     UpdateFee { fee: Uint256 },
     UpdateServiceFeeCollector { new_service_fee_collector: String },
     UpdateServiceFee { new_service_fee: Uint256 },
+    UpdateJobId { new_job_id: String },
 }
 
 #[cw_serde]
