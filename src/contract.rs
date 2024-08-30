@@ -59,6 +59,7 @@ pub fn execute(
         ExecuteMsg::UpdateServiceFee { new_service_fee } => {
             update_service_fee(deps, info, new_service_fee)
         }
+        ExecuteMsg::UpdateJobId { new_job_id } => update_job_id(deps, info, new_job_id),
     }
 }
 
@@ -150,7 +151,7 @@ fn swap(
     Ok(Response::new()
         .add_message(CosmosMsg::Custom(PalomaMsg {
             job_id: state.job_id,
-            payload: Binary(
+            payload: Binary::new(
                 contract
                     .function("swap")
                     .unwrap()
@@ -188,7 +189,7 @@ fn set_paloma(deps: DepsMut, info: MessageInfo) -> Result<Response<PalomaMsg>, C
     Ok(Response::new()
         .add_message(CosmosMsg::Custom(PalomaMsg {
             job_id: state.job_id,
-            payload: Binary(
+            payload: Binary::new(
                 contract
                     .function("set_paloma")
                     .unwrap()
@@ -236,7 +237,7 @@ fn update_compass(
     Ok(Response::new()
         .add_message(CosmosMsg::Custom(PalomaMsg {
             job_id: state.job_id,
-            payload: Binary(
+            payload: Binary::new(
                 contract
                     .function("update_compass")
                     .unwrap()
@@ -284,7 +285,7 @@ fn update_refund_wallet(
     Ok(Response::new()
         .add_message(CosmosMsg::Custom(PalomaMsg {
             job_id: state.job_id,
-            payload: Binary(
+            payload: Binary::new(
                 contract
                     .function("update_refund_wallet")
                     .unwrap()
@@ -331,7 +332,7 @@ fn update_fee(
     Ok(Response::new()
         .add_message(CosmosMsg::Custom(PalomaMsg {
             job_id: state.job_id,
-            payload: Binary(
+            payload: Binary::new(
                 contract
                     .function("update_fee")
                     .unwrap()
@@ -380,7 +381,7 @@ fn update_service_fee_collector(
     Ok(Response::new()
         .add_message(CosmosMsg::Custom(PalomaMsg {
             job_id: state.job_id,
-            payload: Binary(
+            payload: Binary::new(
                 contract
                     .function("update_service_fee_collector")
                     .unwrap()
@@ -427,7 +428,7 @@ fn update_service_fee(
     Ok(Response::new()
         .add_message(CosmosMsg::Custom(PalomaMsg {
             job_id: state.job_id,
-            payload: Binary(
+            payload: Binary::new(
                 contract
                     .function("update_service_fee")
                     .unwrap()
@@ -439,6 +440,24 @@ fn update_service_fee(
             metadata: state.metadata,
         }))
         .add_attribute("action", "update_service_fee"))
+}
+
+fn update_job_id(
+    deps: DepsMut,
+    info: MessageInfo,
+    new_job_id: String,
+) -> Result<Response<PalomaMsg>, ContractError> {
+    let state = STATE.load(deps.storage)?;
+    if state.owner != info.sender {
+        return Err(Unauthorized {});
+    }
+    STATE.update(deps.storage, |mut state| -> Result<State, ContractError> {
+        state.job_id = new_job_id.clone();
+        Ok(state)
+    })?;
+    Ok(Response::new()
+        .add_attribute("action", "update_job_id")
+        .add_attribute("job_id", new_job_id))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
